@@ -26,6 +26,18 @@ class Visualizer : public QWindow, protected QOpenGLFunctions_3_3_Core
         virtual void render();
         void exposeEvent(QExposeEvent *event);
 
+        // API
+        void setSunPosition(QVector3D position);
+        void setMoonPosition(QVector3D position);
+        void setMoonRotation(QVector3D rotation);
+        void setCameraTarget(QVector3D target);
+        std::vector<QVector3D> green_marks;
+        std::vector<QVector3D> red_marks;
+        std::vector<QVector3D> green_orbits_tilt;
+        std::vector<QVector3D> red_orbits_tilt;
+        std::vector<QVector3D> green_orbits_scale;
+        std::vector<QVector3D> red_orbits_scale;
+
     protected:
         void mousePressEvent(QMouseEvent *ev);
         void mouseReleaseEvent(QMouseEvent *ev);
@@ -59,6 +71,7 @@ class Visualizer : public QWindow, protected QOpenGLFunctions_3_3_Core
         GLint m_earth_view_uni_id;
         GLint m_earth_proj_uni_id;
         GLint m_earth_cam_pos_uni_id;
+        GLint m_earth_sun_pos_uni_id;
 
         // Данные шейдера фона
         GLuint m_space_program_id;
@@ -70,6 +83,7 @@ class Visualizer : public QWindow, protected QOpenGLFunctions_3_3_Core
         GLint m_moon_model_uni_id;
         GLint m_moon_view_uni_id;
         GLint m_moon_proj_uni_id;
+        GLint m_moon_sun_pos_uni_id;
 
         // Данные шейдера Солнца
         GLuint m_sun_program_id;
@@ -101,11 +115,11 @@ class Visualizer : public QWindow, protected QOpenGLFunctions_3_3_Core
         GLuint m_sun_map_id;
 
         // Цикл обновления
-        long int last_time = clock();
-        double delta_time;
+        long int m_last_time = clock();
+        double m_delta_time;
 
         // Матрицы отрисовки
-        QMatrix4x4 m_sphere_model_mat;
+        QMatrix4x4 m_earth_model_mat;
         QMatrix4x4 m_sun_model_mat;
         QMatrix4x4 m_moon_model_mat;
         QMatrix4x4 m_orb_model_mat;
@@ -115,13 +129,21 @@ class Visualizer : public QWindow, protected QOpenGLFunctions_3_3_Core
 
         // Данные камеры
         QVector3D m_camera_target;
-        QVector3D m_camera_direction;
+        QVector3D m_camera_direction = QVector3D(0.0f, 0.0f, 1.0f);
 
         // Управление камерой
         bool m_button_down = false;
         QVector2D m_drag_begin;
         float m_zoom = 3.0f;
         float m_last_angle_y = 0.0f;
+
+        // Геометрия
+        QVector3D m_moon_position;
+        QVector3D m_moon_rotation;
+        float m_moon_scale = 0.272f;
+
+        QVector3D m_sun_position;
+        float m_sun_scale = 109.168f;
 
     public slots:
         virtual void draw();

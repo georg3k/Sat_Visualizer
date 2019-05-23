@@ -4,9 +4,12 @@ Visualizer::Visualizer() : QWindow()
 {
     m_gl_context = new QOpenGLContext;
     m_gl_format = new QSurfaceFormat;
-
     setSurfaceType(OpenGLSurface);
 
+    // Для инициализации GL контекста необходимо, чтобы виджет имел заданый размер!
+    resize(1080, 720);
+
+    // Инициализация GL контекста
     m_gl_format->setRenderableType(QSurfaceFormat::OpenGL);
     m_gl_format->setVersion(4, 2);
     m_gl_format->setProfile(QSurfaceFormat::CoreProfile);
@@ -15,15 +18,107 @@ Visualizer::Visualizer() : QWindow()
     m_gl_format->setDepthBufferSize(1);
     m_gl_format->setAlphaBufferSize(1);
 
-    resize(1080, 720);
-
     m_gl_context->setFormat(*m_gl_format);
     m_gl_context->create();
 }
 
 Visualizer::~Visualizer()
 {
-    // TODO: Освобождение буфферов и VAO
+    // Освобождение VBO
+    for(auto b : m_buffers)
+        glDeleteBuffers(1, &b);
+
+    // Освобождение VAO
+    glDeleteVertexArrays(1, &m_sphere_vao_id);
+    glDeleteVertexArrays(1, &m_orb_vao_id);
+
+    // Освобождение текстур
+    glDeleteTextures(1, &m_day_map_id);
+    glDeleteTextures(1, &m_night_map_id);
+    glDeleteTextures(1, &m_normal_map_id);
+    glDeleteTextures(1, &m_space_map_id);
+    glDeleteTextures(1, &m_moon_map_id);
+    glDeleteTextures(1, &m_sun_map_id);
+
+    // Освобождение шейдеров
+    glDeleteProgram(m_earth_program_id);
+    glDeleteProgram(m_space_program_id);
+    glDeleteProgram(m_moon_program_id);
+    glDeleteProgram(m_sun_program_id);
+    glDeleteProgram(m_orb_program_id);
+    glDeleteProgram(m_mark_program_id);
+}
+
+void Visualizer::setSunPosition(QVector3D position)
+{
+    m_sun_position = position;
+
+    // Пересчет матрицы
+    m_sun_model_mat.setToIdentity();
+    m_sun_model_mat.translate(m_sun_position);
+    m_sun_model_mat.scale(m_sun_scale);
+
+    // Обновление юниформ
+    glUseProgram(m_sun_program_id);
+    glUniformMatrix4fv(m_sun_model_uni_id, 1, false, m_sun_model_mat.data());
+    glUseProgram(m_earth_program_id);
+    glUniform3f(m_earth_sun_pos_uni_id, m_sun_position.x(), m_sun_position.y(), m_sun_position.z());
+    glUseProgram(m_moon_program_id);
+    glUniform3f(m_moon_sun_pos_uni_id, m_sun_position.x(), m_sun_position.y(), m_sun_position.z());
+}
+
+void Visualizer::setMoonPosition(QVector3D position)
+{
+    m_moon_position = position;
+
+    // Пересчет матрицы
+    m_moon_model_mat.setToIdentity();
+    m_moon_model_mat.translate(m_moon_position);
+    m_moon_model_mat.rotate(1.0f, m_moon_rotation);
+    m_moon_model_mat.scale(m_moon_scale);
+
+    // Обновление юниформ
+    glUseProgram(m_moon_program_id);
+    glUniformMatrix4fv(m_moon_model_uni_id, 1, false, m_moon_model_mat.data());
+}
+
+void Visualizer::setMoonRotation(QVector3D rotation)
+{
+    m_moon_rotation = rotation;
+
+    // Пересчет матрицы
+    m_moon_model_mat.setToIdentity();
+    m_moon_model_mat.translate(m_moon_position);
+    m_moon_model_mat.rotate(QQuaternion::fromEulerAngles(m_moon_rotation));
+
+    // Обновление юниформ
+    glUseProgram(m_moon_program_id);
+    glUniformMatrix4fv(m_moon_model_uni_id, 1, false, m_moon_model_mat.data());
+}
+
+void Visualizer::setCameraTarget(QVector3D target)
+{
+    m_camera_target = target;
+
+    // Пересчет матрицы
+    m_view_mat.setToIdentity();
+    m_view_mat.lookAt(m_camera_target + (m_camera_direction * m_zoom), m_camera_target, QVector3D(0.0f, 1.0f, 0.0f));
+
+    // Обновление юниформ
+    glUseProgram(m_earth_program_id);
+    glUniformMatrix4fv(m_earth_view_uni_id, 1, false, m_view_mat.data());
+    glUniform3f(m_earth_cam_pos_uni_id, m_camera_direction.x() * m_zoom, m_camera_direction.y() * m_zoom, m_camera_direction.z() * m_zoom);
+    glUseProgram(m_space_program_id);
+    glUniformMatrix4fv(m_space_view_uni_id, 1, false, m_view_mat.data());
+    glUseProgram(m_moon_program_id);
+    glUniformMatrix4fv(m_moon_view_uni_id, 1, false, m_view_mat.data());
+    glUseProgram(m_sun_program_id);
+    glUniformMatrix4fv(m_sun_view_uni_id, 1, false, m_view_mat.data());
+    glUseProgram(m_orb_program_id);
+    glUniformMatrix4fv(m_orb_view_uni_id, 1, false, m_view_mat.data());
+    glUseProgram(m_mark_program_id);
+    glUniformMatrix4fv(m_mark_view_uni_id, 1, false, m_view_mat.data());
+
 }
 
 void Visualizer::exposeEvent(QExposeEvent *event)
@@ -38,9 +133,10 @@ void Visualizer::render()
     if(!m_is_init)
         init();
 
+    // Очистка FrameBuffer'а
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    // Отрисовка космоса
+    // Отрисовка скайбокса
     glUseProgram(m_space_program_id);
 
     glDisable(GL_DEPTH_TEST);
@@ -99,64 +195,66 @@ void Visualizer::render()
     glDrawElements(GL_TRIANGLES, m_sphere_indices_count, GL_UNSIGNED_INT, (void*)NULL);
     glBindVertexArray(0);
 
-    // Отрисовка орбиты 1
-    glUseProgram(m_orb_program_id);
-    glDepthMask(GL_FALSE);
-
-    // ТОЛЬКО ДЛЯ ПРЕВЬЮ!
-    m_orb_model_mat.setToIdentity();
-    m_orb_model_mat.scale(2.0f);
-    glUniformMatrix4fv(m_orb_model_uni_id, 1, false, m_orb_model_mat.data());
-    glUniform3f(m_orb_targ_uni_id, m_camera_target.x(), m_camera_target.y(), m_camera_target.z());
-    glUniform3f(m_orb_col_uni_id, 0.1f, 1.0f, 0.1f);
-    glUniform3f(m_orb_targ_uni_id, m_camera_target.x(), m_camera_target.y(), m_camera_target.z());
-
-    glUseProgram(m_orb_program_id);
-    glBindVertexArray(m_orb_vao_id);
-    glDrawArrays(GL_LINE_LOOP, 0, 200);
-
-    // Отрисовка спутника 1
+    // Отрисовка меток
     glUseProgram(m_mark_program_id);
     glDepthMask(GL_TRUE);
 
-    m_mark_model_mat.setToIdentity();
-    m_mark_model_mat.translate(QVector3D(0.0f, 0.0f, 2.0f));
-    glUniformMatrix4fv(m_mark_model_uni_id, 1, false, m_mark_model_mat.data());
+    // Зеленые
     glUniform3f(m_mark_color_uni_id, 0.1f, 1.0f, 0.1f);
+    for(auto m : green_marks)
+    {
+        m_mark_model_mat.setToIdentity();
+        m_mark_model_mat.translate(m);
+        glUniformMatrix4fv(m_mark_model_uni_id, 1, false, m_mark_model_mat.data());
 
-    glBindVertexArray(m_mark_vao_id);
-    glDrawArrays(GL_POINTS, 0, 1);
+        glBindVertexArray(m_mark_vao_id);
+        glDrawArrays(GL_POINTS, 0, 1);
+    }
 
-    glBindVertexArray(0);
-
-    // Отрисовка орбиты 2
-    glUseProgram(m_orb_program_id);
-    glDepthMask(GL_FALSE);
-
-    // ТОЛЬКО ДЛЯ ПРЕВЬЮ!
-    m_orb_model_mat.setToIdentity();
-    m_orb_model_mat.rotate(20.0f, QVector3D(0.0f, 0.0f, 1.0f));
-    m_orb_model_mat.scale(2.1f);
-    glUniformMatrix4fv(m_orb_model_uni_id, 1, false, m_orb_model_mat.data());
-    glUniform3f(m_orb_targ_uni_id, 1.97f, 0.72f, 0.0f);
-    glUniform3f(m_orb_col_uni_id, 1.0f, 0.1f, 0.1f);
-
-    glBindVertexArray(m_orb_vao_id);
-    glDrawArrays(GL_LINE_LOOP, 0, 200);
-
-    glBindVertexArray(0);
-
-    // Отрисовка спутника 2
-    glUseProgram(m_mark_program_id);
-    glDepthMask(GL_TRUE);
-
-    m_mark_model_mat.setToIdentity();
-    m_mark_model_mat.translate(QVector3D(1.97f, 0.72f, 0.0f));
-    glUniformMatrix4fv(m_mark_model_uni_id, 1, false, m_mark_model_mat.data());
+    // Красные
     glUniform3f(m_mark_color_uni_id, 1.0f, 0.1f, 0.1f);
+    for(auto m : red_marks)
+    {
+        m_mark_model_mat.setToIdentity();
+        m_mark_model_mat.translate(m);
+        glUniformMatrix4fv(m_mark_model_uni_id, 1, false, m_mark_model_mat.data());
 
-    glBindVertexArray(m_mark_vao_id);
-    glDrawArrays(GL_POINTS, 0, 1);
+        glBindVertexArray(m_mark_vao_id);
+        glDrawArrays(GL_POINTS, 0, 1);
+    }
+
+    // Отрисовка орбит
+    glUseProgram(m_orb_program_id);
+
+    // Зеленые
+    glUniform3f(m_orb_col_uni_id, 0.1f, 1.0f, 0.1f);
+    for(unsigned int i = 0; i < green_orbits_tilt.size(); i++)
+    {
+        m_orb_model_mat.setToIdentity();
+        m_orb_model_mat.rotate(QQuaternion::fromEulerAngles(green_orbits_tilt[i]));
+        m_orb_model_mat.scale(green_orbits_scale[i]);
+        glUniformMatrix4fv(m_orb_model_uni_id, 1, false, m_orb_model_mat.data());
+        glUniform3f(m_orb_targ_uni_id, green_marks[i].x(), green_marks[i].y(), green_marks[i].z());
+
+        glUseProgram(m_orb_program_id);
+        glBindVertexArray(m_orb_vao_id);
+        glDrawArrays(GL_LINE_LOOP, 0, 200);
+    }
+
+    // Красные
+    glUniform3f(m_orb_col_uni_id, 1.0f, 0.1f, 0.1f);
+    for(unsigned int i = 0; i < red_orbits_tilt.size(); i++)
+    {
+        m_orb_model_mat.setToIdentity();
+        m_orb_model_mat.rotate(QQuaternion::fromEulerAngles(red_orbits_tilt[i]));
+        m_orb_model_mat.scale(red_orbits_scale[i]);
+        glUniformMatrix4fv(m_orb_model_uni_id, 1, false, m_orb_model_mat.data());
+        glUniform3f(m_orb_targ_uni_id, red_marks[i].x(), red_marks[i].y(), red_marks[i].z());
+
+        glUseProgram(m_orb_program_id);
+        glBindVertexArray(m_orb_vao_id);
+        glDrawArrays(GL_LINE_LOOP, 0, 200);
+    }
 
     glBindVertexArray(0);
 
@@ -210,11 +308,11 @@ void Visualizer::init()
                             "out vec4 color;\n" \
                             "uniform mat4 model_matrix;\n" \
                             "uniform vec3 camera_pos;\n" \
+                            "uniform vec3 sun_pos;\n" \
                             "layout (binding = 0) uniform sampler2D day_map;\n" \
                             "layout (binding = 1) uniform sampler2D night_map;\n" \
                             "layout (binding = 2) uniform sampler2D normal_map;\n" \
                             "void main() {\n" \
-                            "   vec3 sun_pos = vec3(20000.0, 0.0, 0.0);\n" \
                             "   vec3 T = normalize(vec3(model_matrix * vec4(cross(normal_itp, bitangent_itp), 0.0)));\n" \
                             "   vec3 B = normalize(vec3(model_matrix * vec4(bitangent_itp, 0.0)));\n" \
                             "   vec3 N = normalize(vec3(model_matrix * vec4(normal_itp, 0.0)));\n" \
@@ -266,6 +364,7 @@ void Visualizer::init()
     m_earth_view_uni_id = glGetUniformLocation(m_earth_program_id, "view_matrix");
     m_earth_proj_uni_id = glGetUniformLocation(m_earth_program_id, "proj_matrix");
     m_earth_cam_pos_uni_id = glGetUniformLocation(m_earth_program_id, "camera_pos");
+    m_earth_sun_pos_uni_id = glGetUniformLocation(m_earth_program_id, "sun_pos");
 
     // Шейдер космоса
     GLuint vs_space_id = glCreateShader(GL_VERTEX_SHADER);
@@ -338,20 +437,24 @@ void Visualizer::init()
                                "uniform mat4 proj_matrix;\n" \
                                "out vec2 uv_itp;\n" \
                                "out vec3 normal_itp;\n" \
+                               "out vec3 frag_pos;\n" \
                                "void main() {\n" \
                                "   gl_Position = proj_matrix * view_matrix * model_matrix * vec4(position, 1.0);\n" \
                                "   uv_itp = uv;\n" \
                                "   normal_itp = (model_matrix * vec4(normal, 0.0)).xyz;\n" \
+                               "   frag_pos = (model_matrix * vec4(position, 1.0)).xyz;\n" \
                                "}\n";
 
     const char *fs_moon_source = "#version 420 core\n" \
                                "in vec2 uv_itp;\n" \
                                "in vec3 normal_itp;\n" \
+                               "in vec3 frag_pos;\n" \
                                "out vec4 color;\n" \
+                               "uniform vec3 sun_pos;\n" \
                                "layout (binding = 0) uniform sampler2D color_map;\n" \
                                "void main() {\n" \
-                               "   vec3 sun_dir = vec3(1.0, 0.0, 0.0);\n" \
-                               "   color = max(dot(sun_dir, normal_itp), 0.0) * 2.0 * texture(color_map, uv_itp);\n" \
+                               "   vec3 sun_dir = normalize(sun_pos - frag_pos);\n" \
+                               "   color = max(dot(sun_dir, normal_itp), 0.025) * 2.0 * texture(color_map, uv_itp);\n" \
                                "   color.a = 1.0;\n" \
                                "}\n";
 
@@ -389,7 +492,7 @@ void Visualizer::init()
     m_moon_model_uni_id = glGetUniformLocation(m_moon_program_id, "model_matrix");
     m_moon_view_uni_id = glGetUniformLocation(m_moon_program_id, "view_matrix");
     m_moon_proj_uni_id = glGetUniformLocation(m_moon_program_id, "proj_matrix");
-
+    m_moon_sun_pos_uni_id = glGetUniformLocation(m_moon_program_id, "sun_pos");
 
     // Шейдер Солнца
     GLuint vs_sun_id = glCreateShader(GL_VERTEX_SHADER);
@@ -412,7 +515,6 @@ void Visualizer::init()
                                "out vec4 color;\n" \
                                "layout (binding = 0) uniform sampler2D color_map;\n" \
                                "void main() {\n" \
-                               "   vec3 sun_dir = vec3(1.0, 0.0, 0.0);\n" \
                                "   color = texture(color_map, uv_itp);\n" \
                                "   color.a = 1.0;\n" \
                                "}\n";
@@ -452,7 +554,6 @@ void Visualizer::init()
     m_sun_view_uni_id = glGetUniformLocation(m_earth_program_id, "view_matrix");
     m_sun_proj_uni_id = glGetUniformLocation(m_earth_program_id, "proj_matrix");
 
-
     // Шейдер орбит
     GLuint vs_orb_id = glCreateShader(GL_VERTEX_SHADER);
     GLuint fs_orb_id = glCreateShader(GL_FRAGMENT_SHADER);
@@ -472,7 +573,7 @@ void Visualizer::init()
                                "in vec3 pos_int;\n" \
                                "out vec4 color;\n" \
                                "uniform vec3 target_pos;\n" \
-                                "uniform vec3 col;\n" \
+                               "uniform vec3 col;\n" \
                                "void main() {\n" \
                                "   float alpha = min(1.0 / pow(distance(target_pos, pos_int), 3.0), 1.0);\n" \
                                "   color = vec4(col, alpha);\n" \
@@ -515,7 +616,7 @@ void Visualizer::init()
     m_orb_targ_uni_id = glGetUniformLocation(m_orb_program_id, "target_pos");
     m_orb_col_uni_id = glGetUniformLocation(m_orb_program_id, "col");
 
-    // Шейдер точек
+    // Шейдер спутников
     GLuint vs_mark_id = glCreateShader(GL_VERTEX_SHADER);
     GLuint fs_mark_id = glCreateShader(GL_FRAGMENT_SHADER);
 
@@ -796,31 +897,53 @@ void Visualizer::init()
     glGenerateMipmap(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, 0);
 
-    m_camera_direction = QVector3D(0.0f, 0.0f, 1.0f);
-    m_camera_target = QVector3D(0.0f, 0.0f, 2.0f);
-
-    // ДЛЯ ОТЛАДКИ
-    m_sphere_model_mat.setToIdentity();
-
-    m_sun_model_mat.translate(250.0f, 0.0f, 0.0f);
-    m_sun_model_mat.scale(10.0f);
-
-    m_moon_model_mat.translate(-12.0f, 3.0f, 0.0f);
-    m_moon_model_mat.scale(0.5f);
-
-    m_orb_model_mat.setToIdentity();
-    m_orb_model_mat.scale(2.0f);
-
-    m_mark_model_mat.setToIdentity();
-    m_mark_model_mat.translate(0.0f, 0.0f, 2.0f);
-
     m_view_mat.lookAt(m_camera_target + (m_camera_direction * m_zoom), m_camera_target, QVector3D(0.0f, 1.0f, 0.0f));
-    m_proj_mat.perspective(45.0f, (float)width() / (float)height(), 0.01f, 100000.0f);
+    m_proj_mat.perspective(45.0f, (float)width() / (float)height(), 0.01f, 15000.0f);
+
+    // Обновление юниформ
+    glUseProgram(m_earth_program_id);
+    glUniformMatrix4fv(m_earth_view_uni_id, 1, false, m_view_mat.data());
+    glUniform3f(m_earth_cam_pos_uni_id, m_camera_direction.x() * m_zoom, m_camera_direction.y() * m_zoom, m_camera_direction.z() * m_zoom);
+    glUseProgram(m_space_program_id);
+    glUniformMatrix4fv(m_space_view_uni_id, 1, false, m_view_mat.data());
+    glUseProgram(m_moon_program_id);
+    glUniformMatrix4fv(m_moon_view_uni_id, 1, false, m_view_mat.data());
+    glUseProgram(m_sun_program_id);
+    glUniformMatrix4fv(m_sun_view_uni_id, 1, false, m_view_mat.data());
+    glUseProgram(m_orb_program_id);
+    glUniformMatrix4fv(m_orb_view_uni_id, 1, false, m_view_mat.data());
+    glUseProgram(m_mark_program_id);
+    glUniformMatrix4fv(m_mark_view_uni_id, 1, false, m_view_mat.data());
+
+    // Обновление юниформ
+    glUseProgram(m_earth_program_id);
+    glUniformMatrix4fv(m_earth_proj_uni_id, 1, false, m_proj_mat.data());
+    glUseProgram(m_space_program_id);
+    glUniformMatrix4fv(m_space_proj_uni_id, 1, false, m_proj_mat.data());
+    glUseProgram(m_moon_program_id);
+    glUniformMatrix4fv(m_moon_proj_uni_id, 1, false, m_proj_mat.data());
+    glUseProgram(m_sun_program_id);
+    glUniformMatrix4fv(m_sun_proj_uni_id, 1, false, m_proj_mat.data());
+    glUseProgram(m_orb_program_id);
+    glUniformMatrix4fv(m_orb_proj_uni_id, 1, false, m_proj_mat.data());
+    glUseProgram(m_mark_program_id);
+    glUniformMatrix4fv(m_mark_proj_uni_id, 1, false, m_proj_mat.data());
 
     // Завод таймера отрисовки
     QTimer *timer = new QTimer(this);
     QObject::connect(timer, &QTimer::timeout, this, &Visualizer::draw);
     timer->start(1000 / 30);
+
+    // Начальные значения и просчет матрицы Земли
+    m_earth_model_mat.setToIdentity();
+    glUseProgram(m_earth_program_id);
+    glUniformMatrix4fv(m_earth_model_uni_id, 1, false, m_earth_model_mat.data());
+
+    // Начальные значения и просчет матриц других тел
+    setMoonPosition(QVector3D(-30.168f, 0.0f, 0.0f));
+    setMoonRotation(QVector3D(0.0f, 0.0f, 0.0f));
+    setSunPosition(QVector3D(11740.7f, 0.0f, 0.0f));
+    setCameraTarget(QVector3D(0.0f, 0.0f, 0.0f));
 
     m_is_init = true;
 }
@@ -829,52 +952,8 @@ void Visualizer::draw()
 {
     // Замер delta
     long int current_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-    delta_time = (current_time - last_time) / 1000.0;
-    last_time = current_time;
-
-    // ДЛЯ ОТЛАДКИ
-    m_sphere_model_mat.rotate(2.0f * delta_time, QVector3D(0.0f, 1.0f, 0.0f));
-    m_view_mat.setToIdentity();
-    m_view_mat.lookAt(m_camera_target + (m_camera_direction * m_zoom), m_camera_target, QVector3D(0.0f, 1.0f, 0.0f));
-
-    // Передача юниорм шейдеру Земли
-    glUseProgram(m_earth_program_id);
-    glUniformMatrix4fv(m_earth_model_uni_id, 1, false, m_sphere_model_mat.data());
-    glUniformMatrix4fv(m_earth_view_uni_id, 1, false, m_view_mat.data());
-    glUniformMatrix4fv(m_earth_proj_uni_id, 1, false, m_proj_mat.data());
-    glUniform3f(m_earth_cam_pos_uni_id, m_camera_direction.x() * m_zoom, m_camera_direction.y() * m_zoom, m_camera_direction.z() * m_zoom);
-
-    // Передача юниорм шейдеру Космоса
-    glUseProgram(m_space_program_id);
-    glUniformMatrix4fv(m_space_view_uni_id, 1, false, m_view_mat.data());
-    glUniformMatrix4fv(m_space_proj_uni_id, 1, false, m_proj_mat.data());
-
-    // Передача юниорм шейдеру Луны
-    glUseProgram(m_moon_program_id);
-    glUniformMatrix4fv(m_moon_model_uni_id, 1, false, m_moon_model_mat.data());
-    glUniformMatrix4fv(m_moon_view_uni_id, 1, false, m_view_mat.data());
-    glUniformMatrix4fv(m_moon_proj_uni_id, 1, false, m_proj_mat.data());
-
-    // Передача юниорм шейдеру Солнца
-    glUseProgram(m_sun_program_id);
-    glUniformMatrix4fv(m_sun_model_uni_id, 1, false, m_sun_model_mat.data());
-    glUniformMatrix4fv(m_sun_view_uni_id, 1, false, m_view_mat.data());
-    glUniformMatrix4fv(m_sun_proj_uni_id, 1, false, m_proj_mat.data());
-
-    // Передача юниорм шейдеру орбит
-    glUseProgram(m_orb_program_id);
-    glUniformMatrix4fv(m_orb_model_uni_id, 1, false, m_orb_model_mat.data());
-    glUniformMatrix4fv(m_orb_view_uni_id, 1, false, m_view_mat.data());
-    glUniformMatrix4fv(m_orb_proj_uni_id, 1, false, m_proj_mat.data());
-    glUniform3f(m_orb_targ_uni_id, m_camera_target.x(), m_camera_target.y(), m_camera_target.z());
-    glUniform3f(m_orb_col_uni_id, 0.2f, 1.0f, 0.2f);
-
-    // Передача юниформ шейдеру меток
-    glUseProgram(m_mark_program_id);
-    glUniformMatrix4fv(m_mark_model_uni_id, 1, false, m_mark_model_mat.data());
-    glUniformMatrix4fv(m_mark_view_uni_id, 1, false, m_view_mat.data());
-    glUniformMatrix4fv(m_mark_proj_uni_id, 1, false, m_proj_mat.data());
-    glUniform3f(m_mark_color_uni_id, 0.2f, 1.0f, 0.2f);
+    m_delta_time = (current_time - m_last_time) / 1000.0;
+    m_last_time = current_time;
 
     render();
 }
@@ -895,6 +974,7 @@ void Visualizer::mouseReleaseEvent(QMouseEvent *ev)
 
 void Visualizer::mouseMoveEvent(QMouseEvent *ev)
 {
+    // Чувствительность мыши
     const float y_sens = 0.5f;
     const float x_sens = -0.5f;
 
@@ -912,20 +992,54 @@ void Visualizer::mouseMoveEvent(QMouseEvent *ev)
     QMatrix4x4 camera_transform;
     camera_transform.rotate(y_diff, QVector3D::crossProduct(m_camera_direction, QVector3D(0.0, 1.0, 0.0)));
     camera_transform.rotate(x_diff, QVector3D(0.0, 1.0, 0.0));
-
     m_camera_direction = camera_transform * m_camera_direction;
+
+    // Пересчет матрицы
     m_view_mat.setToIdentity();
-    m_view_mat.lookAt(m_camera_direction * m_zoom, m_camera_target, QVector3D(0.0, 1.0, 0.0));
+    m_view_mat.lookAt(m_camera_target + (m_camera_direction * m_zoom), m_camera_target, QVector3D(0.0f, 1.0f, 0.0f));
 
-
+    // Обновление юниформ
+    glUseProgram(m_earth_program_id);
+    glUniformMatrix4fv(m_earth_view_uni_id, 1, false, m_view_mat.data());
+    glUniform3f(m_earth_cam_pos_uni_id, m_camera_direction.x() * m_zoom, m_camera_direction.y() * m_zoom, m_camera_direction.z() * m_zoom);
+    glUseProgram(m_space_program_id);
+    glUniformMatrix4fv(m_space_view_uni_id, 1, false, m_view_mat.data());
+    glUseProgram(m_moon_program_id);
+    glUniformMatrix4fv(m_moon_view_uni_id, 1, false, m_view_mat.data());
+    glUseProgram(m_sun_program_id);
+    glUniformMatrix4fv(m_sun_view_uni_id, 1, false, m_view_mat.data());
+    glUseProgram(m_orb_program_id);
+    glUniformMatrix4fv(m_orb_view_uni_id, 1, false, m_view_mat.data());
+    glUseProgram(m_mark_program_id);
+    glUniformMatrix4fv(m_mark_view_uni_id, 1, false, m_view_mat.data());
 
     m_drag_begin = QVector2D(ev->x(), ev->y());
 }
 
 void Visualizer::wheelEvent(QWheelEvent *ev)
 {
+    // Приблежение камеры
     m_zoom -= ev->angleDelta().y() * 0.001f;
     m_zoom = qBound(0.02f, m_zoom, 12.0f);
+
+    // Пересчет матрицы
+    m_view_mat.setToIdentity();
+    m_view_mat.lookAt(m_camera_target + (m_camera_direction * m_zoom), m_camera_target, QVector3D(0.0f, 1.0f, 0.0f));
+
+    // Обновление юниформ
+    glUseProgram(m_earth_program_id);
+    glUniformMatrix4fv(m_earth_view_uni_id, 1, false, m_view_mat.data());
+    glUniform3f(m_earth_cam_pos_uni_id, m_camera_direction.x() * m_zoom, m_camera_direction.y() * m_zoom, m_camera_direction.z() * m_zoom);
+    glUseProgram(m_space_program_id);
+    glUniformMatrix4fv(m_space_view_uni_id, 1, false, m_view_mat.data());
+    glUseProgram(m_moon_program_id);
+    glUniformMatrix4fv(m_moon_view_uni_id, 1, false, m_view_mat.data());
+    glUseProgram(m_sun_program_id);
+    glUniformMatrix4fv(m_sun_view_uni_id, 1, false, m_view_mat.data());
+    glUseProgram(m_orb_program_id);
+    glUniformMatrix4fv(m_orb_view_uni_id, 1, false, m_view_mat.data());
+    glUseProgram(m_mark_program_id);
+    glUniformMatrix4fv(m_mark_view_uni_id, 1, false, m_view_mat.data());
 }
 
 void Visualizer::resizeEvent(QResizeEvent* ev)
@@ -935,5 +1049,22 @@ void Visualizer::resizeEvent(QResizeEvent* ev)
 
     glViewport(0, 0, width(), height());
     m_proj_mat.setToIdentity();
-    m_proj_mat.perspective(45.0f, (float)width() / (float)height(), 0.01f, 1000.0f);
+
+    // Пересчет матрицы
+    m_proj_mat.perspective(45.0f, (float)width() / (float)height(), 0.01f, 15000.0f);
+
+    // Обновление юниформ
+    glUseProgram(m_earth_program_id);
+    glUniformMatrix4fv(m_earth_proj_uni_id, 1, false, m_proj_mat.data());
+    glUseProgram(m_space_program_id);
+    glUniformMatrix4fv(m_space_proj_uni_id, 1, false, m_proj_mat.data());
+    glUseProgram(m_moon_program_id);
+    glUniformMatrix4fv(m_moon_proj_uni_id, 1, false, m_proj_mat.data());
+    glUseProgram(m_sun_program_id);
+    glUniformMatrix4fv(m_sun_proj_uni_id, 1, false, m_proj_mat.data());
+    glUseProgram(m_orb_program_id);
+    glUniformMatrix4fv(m_orb_proj_uni_id, 1, false, m_proj_mat.data());
+    glUseProgram(m_mark_program_id);
+    glUniformMatrix4fv(m_mark_proj_uni_id, 1, false, m_proj_mat.data());
 }
+
