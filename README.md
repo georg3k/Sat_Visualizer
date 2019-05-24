@@ -4,9 +4,13 @@ Assimp library is required.
 Screenshots:
 
 <p align="center">
-  <img src="https://i.imgur.com/6ZAadrt.png" width="600"/>
+  <img src="https://i.imgur.com/U94pAWB.png" width="600"/>
 
-  <img src="https://i.imgur.com/97CwX9d.png" width="600"/>
+  <img src="https://i.imgur.com/IfdhoTW.png" width="600"/>
 
-  <img src="https://i.imgur.com/2R7QrM3.png" width="600"/>
+  <img src="https://i.imgur.com/737S5Za.png" width="600"/>
 </p>
+
+Useful textures can be found there:
+https://www.solarsystemscope.com/textures/
+http://planetpixelemporium.com/earth.html
